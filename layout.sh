@@ -17,6 +17,15 @@ set -euo pipefail
 
 source omarchy-shell-config
 
+# Serialize edits: every command reads shell.json, changes it and writes it back,
+# and two quick drags would otherwise overwrite each other. The lock is taken on
+# the config directory itself, so no lock file is created (nothing in /tmp, no
+# symlink to follow).
+config_dir=$(dirname -- "$CONFIG_FILE")
+mkdir -p -- "$config_dir"
+exec {lock_fd}<"$config_dir"
+flock -w 10 "$lock_fd" || fail "timed out waiting for another layout change"
+
 FOLDER_ID="io.github.arikisonfire.bar-folder"
 command=${1:?command required}
 shift
