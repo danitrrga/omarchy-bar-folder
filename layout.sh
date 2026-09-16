@@ -86,7 +86,8 @@ case $command in
     [[ $anchor != "$id" ]] || anchor=$FOLDER_ID
     commit "$NORMALIZE | $HELPERS
       (first(.bar.layout[sections[]][] | select(entry_id == \$folder)) // {}) as \$host
-      | ({id: \$id} + ((\$host.widgetSettings // {})[\$id] // {})) as \$entry
+      | (((\$host.widgetSettings // {})[\$id] // {}) | if type == \"object\" then del(.id) else {} end) as \$saved
+      | ({id: \$id} + \$saved) as \$entry
       | folder_update(
           .widgets = ((.widgets // []) | map(select(. != \$id)))
           | if .widgetSettings then .widgetSettings |= del(.[\$id]) else . end)
@@ -112,7 +113,8 @@ case $command in
       | if \$host == null then . else
           ((\$host.widgets // []) | map(select(startswith(\"builtin.\") | not))) as \$ids
           | reduce \$ids[] as \$id (.;
-              ({id: \$id} + ((\$host.widgetSettings // {})[\$id] // {})) as \$entry
+              (((\$host.widgetSettings // {})[\$id] // {}) | if type == \"object\" then del(.id) else {} end) as \$saved
+              | ({id: \$id} + \$saved) as \$entry
               | without_bar_entry(\$id)
               | (first(sections[] as \$s | select(any(.bar.layout[\$s][]; entry_id == \$folder)) | \$s)) as \$section
               | .bar.layout[\$section] |= (

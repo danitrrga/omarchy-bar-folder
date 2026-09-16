@@ -133,6 +133,7 @@ If you already removed the plugin, add the icons back with `omarchy bar put <id>
 - The Omarchy bar has no drag-and-drop API for plugins. Bar Folder watches the bar's own drag state to notice when an icon is released over the folder. A future Omarchy update may change these internals. If dragging into the folder stops working, please open an issue.
 - Moving widgets rewrites `bar.layout` in `shell.json` atomically with Omarchy's own `omarchy-shell-config` helper. It only runs after you drag something or confirm the first-run prompt.
 - `omarchy plugin list` shows third-party plugins that live in the folder as disabled, because they are no longer in the bar layout. They keep working.
+- Widgets are resolved the same way the shell resolves plugins: manifests are validated, entry points must stay inside their plugin directory, third-party plugins cannot take over `omarchy.*` or other first-party ids, and a local clone only replaces a built-in when that clone is enabled. Tile titles are rendered as plain text.
 
 ## License
 

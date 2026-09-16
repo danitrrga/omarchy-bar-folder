@@ -583,6 +583,7 @@ Panel {
             width: parent.width
             wrapMode: Text.WordWrap
             text: root.defaultTitles().join("  ·  ")
+            textFormat: Text.PlainText
             color: Color.popups.text
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -679,6 +680,7 @@ Panel {
                 Text {
                   anchors.centerIn: parent
                   text: tile.glyph
+                  textFormat: Text.PlainText
                   color: tile.failed ? Color.urgent : (tile.lit ? Color.popups.background : Color.popups.text)
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.iconLarge
@@ -696,6 +698,7 @@ Panel {
                 Text {
                   width: parent.width
                   text: tile.title
+                  textFormat: Text.PlainText
                   elide: Text.ElideRight
                   color: Color.popups.text
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -707,6 +710,7 @@ Panel {
                   width: parent.width
                   visible: text !== ""
                   text: tile.status
+                  textFormat: Text.PlainText
                   elide: Text.ElideRight
                   color: Color.popups.text
                   opacity: 0.65
@@ -827,6 +831,7 @@ Panel {
               var id = ghost.item ? ghost.item.id : ""
               return root.icons && root.icons[id] ? String(root.icons[id]) : "\udb81\udc31"
             }
+            textFormat: Text.PlainText
             color: Color.popups.text
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.icon
@@ -840,6 +845,7 @@ Panel {
               if (!ghost.leaving) return title
               return ghost.item && ghost.item.builtin ? title + "  \u2192 remove" : title + "  \u2192 bar"
             }
+            textFormat: Text.PlainText
             color: Color.popups.text
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall

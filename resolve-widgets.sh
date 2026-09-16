@@ -1,46 +1,87 @@
 #!/bin/bash
 # Resolves bar-widget ids to their QML entry points.
 # Usage: resolve-widgets.sh <id>...   ->  JSON array of {id, url, name, builtin}
-# A local clone (omarchy.clonedFrom) wins over the built-in it replaces,
-# matching how the shell routes calls to an enabled clone. Ids starting with
-# `builtin.` are tiles Bar Folder draws itself.
+# Ids starting with `builtin.` are tiles Bar Folder draws itself.
+#
+# Resolution follows the shell's plugin registry, so hosting a widget in the
+# folder never loads code the shell itself would refuse to load:
+#   - manifests are validated the same way (schemaVersion, id, relative
+#     entry points without `..`);
+#   - first-party plugins win; third-party plugins cannot claim an
+#     `omarchy.*` id or the id of a first-party plugin;
+#   - a local clone (omarchy.clonedFrom) only replaces the built-in when that
+#     clone is enabled in shell.json or sits in the folder itself.
 
 set -euo pipefail
 
 user_dir="$HOME/.config/omarchy/plugins"
 system_dir="${OMARCHY_PATH:-/usr/share/omarchy}/shell/plugins"
+config_file="$HOME/.config/omarchy/shell.json"
+folder_id="io.github.arikisonfire.bar-folder"
 
-manifests() {
-  find "$user_dir" -mindepth 2 -maxdepth 2 -name manifest.json 2>/dev/null || true
-  find "$system_dir" \( -name manifest.json -o -name '*.manifest.json' \) 2>/dev/null || true
+emit() {
+  local kind=$1 file=$2
+  jq -c --arg dir "$(dirname -- "$file")" --arg kind "$kind" '
+    def safe_entry: type == "string" and length > 0
+      and (startswith("/") | not) and (contains("..") | not);
+    select(type == "object"
+      and .schemaVersion == 1
+      and (.id | type == "string" and length > 0 and (contains("/") | not) and (contains("..") | not))
+      and .name != null and .version != null
+      and (.kinds | type == "array" and length > 0)
+      and (.entryPoints | type == "object" and ([.[] | safe_entry] | all))
+      and (.entryPoints.barWidget | type == "string"))
+    | {
+        id,
+        firstParty: ($kind == "firstparty"),
+        clonedFrom: ((.omarchy | objects | .clonedFrom | strings) // ""),
+        name: ((.barWidget | objects | .displayName | strings) // (.name | tostring)),
+        path: ($dir + "/" + .entryPoints.barWidget)
+      }' "$file" 2>/dev/null || true
 }
 
 catalog=$(
-  manifests | while IFS= read -r file; do
-    user=0
-    [[ $file == "$user_dir"/* ]] && user=1
-    jq -c --arg dir "$(dirname "$file")" --arg user "$user" '
-      select(.entryPoints.barWidget? | type == "string")
-      | {
-          id,
-          clonedFrom: (.omarchy.clonedFrom // ""),
-          user: ($user == "1"),
-          name: (.barWidget.displayName // .name // .id),
-          path: ($dir + "/" + .entryPoints.barWidget)
-        }' "$file" 2>/dev/null || true
-  done | jq -s '.'
+  {
+    if [[ -d $system_dir ]]; then
+      find "$system_dir" -mindepth 2 -maxdepth 3 -type f \( -name manifest.json -o -name '*.manifest.json' \) -print0 2>/dev/null \
+        | sort -z | while IFS= read -r -d '' file; do emit firstparty "$file"; done
+    fi
+    for file in "$user_dir"/*/manifest.json; do
+      if [[ -f $file ]]; then emit thirdparty "$file"; fi
+    done
+  } | jq -s '
+    (map(select(.firstParty) | .id) | unique) as $first
+    | map(select(.firstParty or ((.id | startswith("omarchy.") | not) and (.id | IN($first[]) | not))))'
 )
 
-jq -n --argjson catalog "$catalog" '
+config='{}'
+if [[ -s $config_file ]]; then
+  config=$(jq -c 'if type == "object" then . else {} end' "$config_file" 2>/dev/null || echo '{}')
+fi
+
+# Ids travel as one JSON value, never as jq command-line arguments.
+ids=$(if (($#)); then printf '%s\n' "$@"; fi | jq -R . | jq -s -c 'map(select(. != ""))')
+
+jq -n --argjson catalog "$catalog" --argjson config "$config" --argjson ids "$ids" --arg folder "$folder_id" '
+  def entry_id: if type == "object" then (.id // "" | tostring) else tostring end;
+  def valid_id: test("^[A-Za-z0-9][A-Za-z0-9._-]*$") and (contains("..") | not);
+  def file_url: "file://" + (split("/") | map(@uri) | join("/"));
   {"builtin.notifications": "Notifications"} as $builtins
-  | [$ARGS.positional[] as $id
+  | ([($config.bar | objects | .layout | objects | .[] | arrays | .[] | entry_id),
+      ($config.plugins | arrays | .[] | entry_id),
+      ($config.bar | objects | .id | strings)] | map(select(. != ""))) as $referenced
+  | (($config.disabledPlugins | arrays) // []) as $disabled
+  | ($referenced + $ids) as $active
+  | [$ids[] as $id
      | if $builtins[$id] then {id: $id, url: "", name: $builtins[$id], builtin: true}
+       elif ($id | valid_id | not) or $id == $folder then {id: $id, url: "", name: $id, builtin: false}
        else
-         ([$catalog[] | select(.user and .clonedFrom == $id)][0]
+         ([$catalog[] | select((.firstParty | not) and .clonedFrom == $id
+                               and (.id | IN($active[])) and (.id | IN($disabled[]) | not))][0]
           // [$catalog[] | select(.id == $id)][0]) as $hit
-         | if $hit and ($hit.path | contains("/../") | not)
-           then {id: $id, url: ("file://" + $hit.path), name: $hit.name, builtin: false}
+         | if $hit
+           then {id: $id, url: ($hit.path | file_url), name: $hit.name, builtin: false}
            else {id: $id, url: "", name: $id, builtin: false}
            end
        end]
-' --args "$@"
+'
