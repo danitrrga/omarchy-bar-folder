@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.arikisonfire.bar-folder",
+  "name": "Bar Folder",
+  "version": "1.0.0",
+  "author": "arikisonfire",
+  "license": "MIT",
+  "description": "A simple folder for your bar icons: drag plugins in and out so the bar never gets too cluttered",
+  "homepage": "https://github.com/arikisonfire/omarchy-bar-folder",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarFolder.qml"
+  },
+  "barWidget": {
+    "displayName": "Bar Folder",
+    "description": "One bar icon that holds other bar icons as tiles; drag icons in and out",
+    "category": "Bar",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "columns": 2
+    },
+    "schema": [
+      { "key": "columns", "type": "integer", "label": "Tile columns", "min": 1, "max": 4, "step": 1, "defaultValue": 2 },
+      { "key": "icon", "type": "string", "label": "Bar icon glyph (closed)" },
+      { "key": "iconOpen", "type": "string", "label": "Bar icon glyph (open)" }
+    ]
+  }
+}
