@@ -5,8 +5,9 @@
 #
 # Resolution follows the shell's plugin registry, so hosting a widget in the
 # folder never loads code the shell itself would refuse to load:
-#   - manifests are validated the same way (schemaVersion, id, relative
-#     entry points without `..`);
+#   - manifests are validated the same way (schemaVersion, id, kind
+#     `bar-widget`, relative entry points without `..`);
+#   - plugins listed in `disabledPlugins` are not loaded;
 #   - first-party plugins win; third-party plugins cannot claim an
 #     `omarchy.*` id or the id of a first-party plugin;
 #   - a local clone (omarchy.clonedFrom) only replaces the built-in when that
@@ -28,7 +29,7 @@ emit() {
       and .schemaVersion == 1
       and (.id | type == "string" and length > 0 and (contains("/") | not) and (contains("..") | not))
       and .name != null and .version != null
-      and (.kinds | type == "array" and length > 0)
+      and (.kinds | type == "array" and index("bar-widget") != null)
       and (.entryPoints | type == "object" and ([.[] | safe_entry] | all))
       and (.entryPoints.barWidget | type == "string"))
     | {
@@ -76,9 +77,14 @@ jq -n --argjson catalog "$catalog" --argjson config "$config" --argjson ids "$id
      | if $builtins[$id] then {id: $id, url: "", name: $builtins[$id], builtin: true}
        elif ($id | valid_id | not) or $id == $folder then {id: $id, url: "", name: $id, builtin: false}
        else
+         # Same precedence as the registry: an enabled clone first, then the
+         # last manifest registered under that id (first-party before third-party).
          ([$catalog[] | select((.firstParty | not) and .clonedFrom == $id
                                and (.id | IN($active[])) and (.id | IN($disabled[]) | not))][0]
-          // [$catalog[] | select(.id == $id)][0]) as $hit
+          // (if $id | IN($disabled[]) then null
+              else ([$catalog[] | select(.id == $id and .firstParty)] | last)
+                // ([$catalog[] | select(.id == $id and (.firstParty | not))] | last)
+              end)) as $hit
          | if $hit
            then {id: $id, url: ($hit.path | file_url), name: $hit.name, builtin: false}
            else {id: $id, url: "", name: $id, builtin: false}
