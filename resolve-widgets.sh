@@ -1,6 +1,7 @@
 #!/bin/bash
 # Resolves bar-widget ids to their QML entry points.
-# Usage: resolve-widgets.sh <id>...   ->  JSON array of {id, url, name, builtin}
+# Usage: resolve-widgets.sh <id>...
+#   ->  JSON array of {id, pluginId, url, name, builtin, serviceUrl, manifest}
 # Ids starting with `builtin.` are tiles Bar Folder draws itself.
 #
 # Resolution follows the shell's plugin registry, so hosting a widget in the
@@ -12,6 +13,14 @@
 #     `omarchy.*` id or the id of a first-party plugin;
 #   - a local clone (omarchy.clonedFrom) only replaces the built-in when that
 #     clone is enabled in shell.json or sits in the folder itself.
+#
+# `serviceUrl` is set for third-party plugins that also declare a service,
+# but only while the shell does not run that service itself (the plugin is
+# neither in the bar layout nor in `plugins`). Bar Folder then runs it, so
+# there is always exactly one instance. Services the shell treats specially
+# are never hosted: `keepLoaded` ones and clones of first-party plugins with
+# the `authentication` capability (lock, polkit), which the shell keeps
+# isolated from every plugin.
 
 set -euo pipefail
 
@@ -37,7 +46,11 @@ emit() {
         firstParty: ($kind == "firstparty"),
         clonedFrom: ((.omarchy | objects | .clonedFrom | strings) // ""),
         name: ((.barWidget | objects | .displayName | strings) // (.name | tostring)),
-        path: ($dir + "/" + .entryPoints.barWidget)
+        path: ($dir + "/" + .entryPoints.barWidget),
+        servicePath: (if (.kinds | index("service") != null) and (.entryPoints.service | type == "string")
+          then $dir + "/" + .entryPoints.service else "" end),
+        keepLoaded: (.keepLoaded == true),
+        manifest: (if (.kinds | index("service") != null) then . else null end)
       }' "$file" 2>/dev/null || true
 }
 
@@ -55,6 +68,18 @@ catalog=$(
     | map(select(.firstParty or ((.id | startswith("omarchy.") | not) and (.id | IN($first[]) | not))))'
 )
 
+# First-party plugins with the `authentication` capability (lock, polkit).
+# They are services only, so they are not in the widget catalog above.
+authentication='[]'
+if [[ -d $system_dir ]]; then
+  authentication=$(
+    find "$system_dir" -mindepth 2 -maxdepth 3 -type f \( -name manifest.json -o -name '*.manifest.json' \) -print0 2>/dev/null \
+      | xargs -0 -r jq -c 'select(type == "object" and (.id | type == "string")
+          and ((.omarchy | objects | .capabilities | arrays) // [] | index("authentication") != null)) | .id' 2>/dev/null \
+      | jq -s -c 'unique' || echo '[]'
+  )
+fi
+
 config='{}'
 if [[ -s $config_file ]]; then
   config=$(jq -c 'if type == "object" then . else {} end' "$config_file" 2>/dev/null || echo '{}')
@@ -63,7 +88,7 @@ fi
 # Ids travel as one JSON value, never as jq command-line arguments.
 ids=$(if (($#)); then printf '%s\n' "$@"; fi | jq -R . | jq -s -c 'map(select(. != ""))')
 
-jq -n --argjson catalog "$catalog" --argjson config "$config" --argjson ids "$ids" --arg folder "$folder_id" '
+jq -n --argjson catalog "$catalog" --argjson authentication "${authentication:-[]}" --argjson config "$config" --argjson ids "$ids" --arg folder "$folder_id" '
   def entry_id: if type == "object" then (.id // "" | tostring) else tostring end;
   def valid_id: test("^[A-Za-z0-9][A-Za-z0-9._-]*$") and (contains("..") | not);
   def file_url: "file://" + (split("/") | map(@uri) | join("/"));
@@ -74,8 +99,9 @@ jq -n --argjson catalog "$catalog" --argjson config "$config" --argjson ids "$id
   | (($config.disabledPlugins | arrays) // []) as $disabled
   | ($referenced + $ids) as $active
   | [$ids[] as $id
-     | if $builtins[$id] then {id: $id, url: "", name: $builtins[$id], builtin: true}
-       elif ($id | valid_id | not) or $id == $folder then {id: $id, url: "", name: $id, builtin: false}
+     | if $builtins[$id] then {id: $id, pluginId: $id, url: "", name: $builtins[$id], builtin: true, serviceUrl: ""}
+       elif ($id | valid_id | not) or $id == $folder
+       then {id: $id, pluginId: $id, url: "", name: $id, builtin: false, serviceUrl: ""}
        else
          # Same precedence as the registry: an enabled clone first, then the
          # last manifest registered under that id (first-party before third-party).
@@ -86,8 +112,14 @@ jq -n --argjson catalog "$catalog" --argjson config "$config" --argjson ids "$id
                 // ([$catalog[] | select(.id == $id and (.firstParty | not))] | last)
               end)) as $hit
          | if $hit
-           then {id: $id, url: ($hit.path | file_url), name: $hit.name, builtin: false}
-           else {id: $id, url: "", name: $id, builtin: false}
+           then ((($hit.firstParty | not) and $hit.servicePath != ""
+                  and ($hit.keepLoaded | not)
+                  and ($hit.clonedFrom | IN($authentication[]) | not)
+                  and ($hit.id | IN($referenced[]) | not)) as $hosted
+                 | {id: $id, pluginId: $hit.id, url: ($hit.path | file_url), name: $hit.name, builtin: false,
+                    serviceUrl: (if $hosted then ($hit.servicePath | file_url) else "" end),
+                    manifest: (if $hosted then $hit.manifest else null end)})
+           else {id: $id, pluginId: $id, url: "", name: $id, builtin: false, serviceUrl: ""}
            end
        end]
 '

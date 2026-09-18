@@ -57,6 +57,10 @@ Panel {
 
   property var resolved: []
   property string resolvedKey: ""
+  // Our own service (FolderService.qml), which runs the services of the
+  // plugins inside the folder. The shell creates it once for all bars.
+  readonly property var folderService: root.bar && root.bar.shell
+    && typeof root.bar.shell.serviceFor === "function" ? root.bar.shell.serviceFor(root.moduleName) : null
   property int selectedIndex: 0
   property bool cursorActive: false
 
@@ -73,7 +77,27 @@ Panel {
       var host = hosts.itemAt(i)
       if (host && host.widgetId === id) return host
     }
+    for (var j = 0; j < hosts.count; j++) {
+      var clone = hosts.itemAt(j)
+      if (clone && clone.pluginId === id) return clone
+    }
     return null
+  }
+
+  function syncServices() {
+    if (root.folderService && typeof root.folderService.sync === "function")
+      root.folderService.sync(root.resolved)
+  }
+
+  // The first line of a widget's tooltip, without a leading "<title> · ".
+  // Tooltips are often several lines, which would overflow the tile.
+  function statusLine(text, title) {
+    var lines = String(text || "").split("\n")
+    var line = ""
+    for (var i = 0; i < lines.length && !line; i++) line = lines[i].trim()
+    var prefix = String(title || "") + " · "
+    if (title && line.indexOf(prefix) === 0 && line.length > prefix.length) line = line.slice(prefix.length)
+    return line
   }
 
   function resolveWidgets() {
@@ -132,6 +156,7 @@ Panel {
   }
 
   onWidgetIdsChanged: resolveWidgets()
+  onFolderServiceChanged: syncServices()
   Component.onCompleted: {
     resolveWidgets()
     slotScan.restart()
@@ -310,7 +335,10 @@ Panel {
   property int tileDragIndex: -1
   // Ids already dragged out; hidden until the layout change lands.
   property var pendingOut: []
-  onResolvedChanged: pendingOut = []
+  onResolvedChanged: {
+    pendingOut = []
+    syncServices()
+  }
   property point tileDragPoint: Qt.point(0, 0)
   // null | { kind: "tile", index } | { kind: "bar", anchor, after, x, y, length } | { kind: "outside" }
   property var tileDropTarget: null
@@ -471,6 +499,12 @@ Panel {
       host.open()
       return id
     }
+    function closeWidget(id: string): string {
+      var host = root.hostFor(id)
+      if (!host) return "unknown"
+      host.close()
+      return id
+    }
   }
 
   implicitWidth: button.implicitWidth
@@ -517,6 +551,8 @@ Panel {
         required property var modelData
         anchors.fill: parent
         widgetId: String(modelData.id)
+        pluginId: String(modelData.pluginId || modelData.id)
+        folderService: root.folderService
         source: String(modelData.url || "")
         builtin: modelData.builtin === true
         realBar: root.bar
@@ -648,7 +684,7 @@ Panel {
                 if (host.glyph) return host.glyph
                 return root.icons && root.icons[modelData.id] ? String(root.icons[modelData.id]) : "󰐱"
               }
-              readonly property string status: tile.failed ? "Failed to load" : host.status
+              readonly property string status: tile.failed ? "Failed to load" : root.statusLine(host.status, tile.title)
 
               readonly property bool dragged: root.tileDragIndex === tile.index
               readonly property bool dropTarget: !!root.tileDropTarget && root.tileDropTarget.kind === "tile"
@@ -657,6 +693,7 @@ Panel {
               visible: root.pendingOut.indexOf(String(modelData.id)) === -1
               width: root.tileWidth
               height: root.tileHeight
+              clip: true
               radius: Style.cornerRadius
               opacity: tile.dragged ? 0.35 : 1
               color: Util.alpha(Color.popups.text, tile.highlighted && root.tileDragIndex < 0 ? 0.13 : 0.06)
@@ -699,6 +736,8 @@ Panel {
                   width: parent.width
                   text: tile.title
                   textFormat: Text.PlainText
+                  wrapMode: Text.NoWrap
+                  maximumLineCount: 1
                   elide: Text.ElideRight
                   color: Color.popups.text
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -711,6 +750,8 @@ Panel {
                   visible: text !== ""
                   text: tile.status
                   textFormat: Text.PlainText
+                  wrapMode: Text.NoWrap
+                  maximumLineCount: 1
                   elide: Text.ElideRight
                   color: Color.popups.text
                   opacity: 0.65

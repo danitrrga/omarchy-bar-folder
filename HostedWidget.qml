@@ -14,12 +14,17 @@ Item {
   id: root
 
   required property string widgetId
+  // The plugin that implements the widget; differs from widgetId when an
+  // enabled local clone stands in for a built-in.
+  property string pluginId: widgetId
   property url source: ""
   property bool builtin: false
   // The folder's own bar facade; popout coordination goes through it so
   // opening a hosted popup closes the folder panel and vice versa.
   property var realBar: null
   property var widgetSettings: ({})
+  // Bar Folder's service, which runs the services of hosted plugins.
+  property var folderService: null
 
   signal settingsPersisted(string widgetId, var settings)
   signal closeFolderRequested()
@@ -180,14 +185,24 @@ Item {
     id: hostShell
 
     readonly property string pluginId: root.widgetId
-    readonly property var realShell: root.realBar ? root.realBar.shell : null
-    readonly property var barConfig: realShell ? realShell.barConfig : ({})
-    readonly property var idleConfig: realShell ? realShell.idleConfig : ({})
+    // No handle to the folder's own shell API or bar: through it a hosted
+    // plugin could reach the folder's settings and other plugins' services.
+    readonly property var barConfig: root.realBar && root.realBar.shell ? root.realBar.shell.barConfig : ({})
+    readonly property var idleConfig: ({})
     readonly property var appLibrary: null
     readonly property var bar: null
 
-    function owns(id) { return String(id || "") === root.widgetId }
-    function serviceFor(id) { return null }
+    function owns(id) {
+      var key = String(id || "")
+      return key === root.widgetId || key === root.pluginId
+    }
+    // Only the hosted plugin's own service, as the shell's scoped API does.
+    // Reads `folderService.services`, so bindings update once it has started.
+    function serviceFor(id) {
+      if (!owns(id) || !root.folderService) return null
+      return root.folderService.services[root.pluginId]
+        ? root.folderService.serviceFor(root.pluginId) : null
+    }
     function firstPartyServiceFor(id) { return null }
     function pluginShellForBarEntry(ownerId, moduleName) { return null }
     function mutateShellConfig(mutator) { return false }
@@ -219,28 +234,27 @@ Item {
   QtObject {
     id: hostBar
 
-    readonly property var bar: root.realBar
     readonly property var shell: hostShell
     readonly property string pluginId: root.widgetId
     readonly property string moduleName: root.widgetId
 
-    readonly property color foreground: bar ? bar.foreground : Color.foreground
-    readonly property color barForeground: bar ? bar.barForeground : Color.foreground
-    readonly property color background: bar ? bar.background : Color.background
-    readonly property color urgent: bar ? bar.urgent : Color.urgent
-    readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-    readonly property string position: bar ? bar.position : "top"
-    readonly property bool vertical: bar ? bar.vertical === true : false
-    readonly property int barSize: bar ? bar.barSize : Style.bar.sizeHorizontal
-    readonly property bool transparent: bar ? bar.transparent === true : false
-    readonly property bool foregroundAnimationEnabled: bar ? bar.foregroundAnimationEnabled !== false : true
-    readonly property bool centerSectionRevealHeld: bar ? bar.centerSectionRevealHeld === true : false
-    readonly property bool centerHoverRevealSuppressed: bar ? bar.centerHoverRevealSuppressed === true : false
-    readonly property var activePopout: bar ? bar.activePopout : null
+    readonly property color foreground: root.realBar ? root.realBar.foreground : Color.foreground
+    readonly property color barForeground: root.realBar ? root.realBar.barForeground : Color.foreground
+    readonly property color background: root.realBar ? root.realBar.background : Color.background
+    readonly property color urgent: root.realBar ? root.realBar.urgent : Color.urgent
+    readonly property string fontFamily: root.realBar ? root.realBar.fontFamily : Style.font.family
+    readonly property string position: root.realBar ? root.realBar.position : "top"
+    readonly property bool vertical: root.realBar ? root.realBar.vertical === true : false
+    readonly property int barSize: root.realBar ? root.realBar.barSize : Style.bar.sizeHorizontal
+    readonly property bool transparent: root.realBar ? root.realBar.transparent === true : false
+    readonly property bool foregroundAnimationEnabled: root.realBar ? root.realBar.foregroundAnimationEnabled !== false : true
+    readonly property bool centerSectionRevealHeld: root.realBar ? root.realBar.centerSectionRevealHeld === true : false
+    readonly property bool centerHoverRevealSuppressed: root.realBar ? root.realBar.centerHoverRevealSuppressed === true : false
+    readonly property var activePopout: root.realBar ? root.realBar.activePopout : null
     // The real bar's targets, so a click on the bar while a hosted popup is
     // open reaches the folder icon instead of the hidden widget.
-    readonly property var clickTargets: bar ? bar.clickTargets : []
-    readonly property var layoutConfig: bar ? bar.layoutConfig : ({})
+    readonly property var clickTargets: root.realBar ? root.realBar.clickTargets : []
+    readonly property var layoutConfig: root.realBar ? root.realBar.layoutConfig : ({})
 
     function showTooltip(target, text) { }
     function hideTooltip(target) { }
@@ -253,16 +267,16 @@ Item {
     function unregisterClickTarget(target) {
       root.targets = root.targets.filter(function(item) { return item !== target })
     }
-    function requestPopout(owner) { if (bar) bar.requestPopout(owner) }
-    function releasePopout(owner) { if (bar) bar.releasePopout(owner) }
+    function requestPopout(owner) { if (root.realBar) root.realBar.requestPopout(owner) }
+    function releasePopout(owner) { if (root.realBar) root.realBar.releasePopout(owner) }
     function switchPanelFrom(owner, direction) { return false }
     function targetBelongsToWindow(target, window) {
-      return bar ? bar.targetBelongsToWindow(target, window) : false
+      return root.realBar ? root.realBar.targetBelongsToWindow(target, window) : false
     }
     function moduleWidgets(id) { return root.widget ? [root.widget] : [] }
-    function run(command) { if (bar) bar.run(command) }
+    function run(command) { if (root.realBar) root.realBar.run(command) }
     function setCenterHoverRevealSuppressed(value) {
-      if (bar && typeof bar.setCenterHoverRevealSuppressed === "function") bar.setCenterHoverRevealSuppressed(value)
+      if (root.realBar && typeof root.realBar.setCenterHoverRevealSuppressed === "function") root.realBar.setCenterHoverRevealSuppressed(value)
     }
   }
 

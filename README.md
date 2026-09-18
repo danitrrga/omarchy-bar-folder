@@ -18,6 +18,7 @@ Every plugin you install wants its own icon in the bar, and sooner or later the 
 - **Every plugin keeps working.** A left-click on a tile opens that plugin's own panel. Right-click, middle-click and scrolling are forwarded to the plugin, so scrolling over Sound still changes the volume.
 - **Keyboard friendly.** Arrow keys or `h` `j` `k` `l` move between tiles, `Enter` opens one, `Esc` closes the folder.
 - **Built-in Notifications tile.** Click to toggle Do Not Disturb, right-click to show recent notifications again.
+- **Plugins with a background service keep working.** Plugins such as a blue-light filter that come with their own service are started by Bar Folder while they live in the folder, and handed back to the shell when you drag them out.
 - **Settings travel along.** Inline settings of a widget, such as `showPercentage` on Power, are kept while it lives in the folder and restored when you drag it out.
 - **Follows your Omarchy theme.**
 
@@ -133,6 +134,9 @@ If you already removed the plugin, add the icons back with `omarchy bar put <id>
 - The Omarchy bar has no drag-and-drop API for plugins. Bar Folder watches the bar's own drag state to notice when an icon is released over the folder. A future Omarchy update may change these internals. If dragging into the folder stops working, please open an issue.
 - Moving widgets rewrites `bar.layout` in `shell.json` atomically with Omarchy's own `omarchy-shell-config` helper. It only runs after you drag something or confirm the first-run prompt.
 - `omarchy plugin list` shows third-party plugins that live in the folder as disabled, because they are no longer in the bar layout. They keep working.
+- The shell only runs a plugin's service while that plugin is on the bar. For plugins inside the folder, Bar Folder's own service starts it instead, exactly once no matter how many bars you have, and hands it only to that plugin's widget. As soon as the plugin is back on the bar, the shell takes over again. Lock and polkit clones and `keepLoaded` services are never started by Bar Folder.
+- Plugins inside the folder share the folder's part of the shell, much like widgets on the bar share the bar. Only put plugins in the folder that you would also trust on your bar.
+- Tile subtitles show the first line of a plugin's tooltip, so long or multi-line tooltips never overflow a tile.
 - Widgets are resolved the same way the shell resolves plugins: manifests are validated, entry points must stay inside their plugin directory, third-party plugins cannot take over `omarchy.*` or other first-party ids, and a local clone only replaces a built-in when that clone is enabled. Tile titles are rendered as plain text.
 
 ## License
